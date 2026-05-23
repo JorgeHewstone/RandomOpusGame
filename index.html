@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bomba Opus</title>
+    
+    <!-- Cargamos Tailwind CSS para el diseño -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Cargamos React -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Cargamos Babel para que entienda el código en el navegador -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-slate-900 text-white font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+
+        function App() {
+            const [audioBuffer, setAudioBuffer] = useState(null);
+            const [audioFileName, setAudioFileName] = useState("");
+            const [isLoading, setIsLoading] = useState(false);
+            
+            const [dropTimeStr, setDropTimeStr] = useState("03:42");
+            const [minTime, setMinTime] = useState(30);
+            const [maxTime, setMaxTime] = useState(120);
+
+            const [gameState, setGameState] = useState("idle");
+            const [errorMsg, setErrorMsg] = useState("");
+
+            const audioCtxRef = useRef(null);
+            const source1Ref = useRef(null);
+            const source2Ref = useRef(null);
+            const timeoutRef = useRef(null);
+
+            const parseTime = (timeStr) => {
+                const parts = timeStr.split(':');
+                if (parts.length === 2) {
+                    return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+                }
+                return parseInt(timeStr, 10) || 0;
+            };
+
+            const handleFileUpload = async (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                setAudioFileName(file.name);
+                setIsLoading(true);
+                setErrorMsg("");
+
+                try {
+                    if (!audioCtxRef.current) {
+                        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+                    }
+
+                    const arrayBuffer = await file.arrayBuffer();
+                    const decodedBuffer = await audioCtxRef.current.decodeAudioData(arrayBuffer);
+                    setAudioBuffer(decodedBuffer);
+                    setIsLoading(false);
+                } catch (error) {
+                    setErrorMsg("Error al cargar el archivo de audio.");
+                    setIsLoading(false);
+                }
+            };
+
+            const stopJuego = () => {
+                if (source1Ref.current) { try { source1Ref.current.stop(); } catch (e) {} }
+                if (source2Ref.current) { try { source2Ref.current.stop(); } catch (e) {} }
+                if (timeoutRef.current) clearTimeout(timeoutRef.current);
+                setGameState("idle");
+            };
+
+            const iniciarJuego = async () => {
+                if (!audioBuffer) {
+                    setErrorMsg("Por favor, sube la canción primero.");
+                    return;
+                }
+
+                const dropSeconds = parseTime(dropTimeStr);
+                let minSeconds = parseInt(minTime, 10);
+                let maxSeconds = parseInt(maxTime, 10);
+
+                if (dropSeconds <= 0) return setErrorMsg("El drop debe ser mayor a 0.");
+                if (minSeconds >= maxSeconds) maxSeconds = minSeconds + 10;
+                if (maxSeconds > dropSeconds) maxSeconds = dropSeconds;
+
+                setErrorMsg("");
+                stopJuego();
+
+                const ctx = audioCtxRef.current;
+                if (ctx.state === 'suspended') await ctx.resume();
+
+                const targetDuration = Math.floor(Math.random() * (maxSeconds - minSeconds + 1)) + minSeconds;
+                const skipAmount = dropSeconds - targetDuration;
+
+                const t0 = ctx.currentTime;
+                const masterGain = ctx.createGain();
+                masterGain.connect(ctx.destination);
+
+                if (skipAmount <= 0) {
+                    const source = ctx.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(masterGain);
+                    source.start(t0);
+                    source1Ref.current = source;
+                } else {
+                    const introDuration = Math.min(15, targetDuration * 0.4); 
+                    const crossfadeDuration = Math.min(4, introDuration * 0.8); 
+
+                    const source1 = ctx.createBufferSource();
+                    source1.buffer = audioBuffer;
+                    const gain1 = ctx.createGain();
+                    source1.connect(gain1);
+                    gain1.connect(masterGain);
+
+                    const source2 = ctx.createBufferSource();
+                    source2.buffer = audioBuffer;
+                    const gain2 = ctx.createGain();
+                    source2.connect(gain2);
+                    gain2.connect(masterGain);
+
+                    source1Ref.current = source1;
+                    source2Ref.current = source2;
+
+                    source1.start(t0, 0);
+                    gain1.gain.setValueAtTime(1, t0 + introDuration - crossfadeDuration);
+                    gain1.gain.linearRampToValueAtTime(0, t0 + introDuration);
+
+                    const s2StartTime = t0 + introDuration - crossfadeDuration;
+                    const s2Offset = introDuration + skipAmount - crossfadeDuration;
+                    
+                    source2.start(s2StartTime, s2Offset);
+                    gain2.gain.setValueAtTime(0, s2StartTime);
+                    gain2.gain.linearRampToValueAtTime(1, t0 + introDuration);
+
+                    source1.stop(t0 + introDuration + 0.1);
+                }
+
+                setGameState("playing");
+                timeoutRef.current = setTimeout(() => setGameState("exploded"), targetDuration * 1000);
+            };
+
+            return (
+                <div className="flex flex-col items-center py-6 px-4">
+                    <div className="max-w-md w-full bg-slate-800 rounded-2xl shadow-xl overflow-hidden border border-slate-700 pb-6">
+                        
+                        <div className="bg-slate-950 p-6 text-center border-b border-slate-700">
+                            <div className="text-5xl mb-2">
+                                {gameState === 'exploded' ? '💥' : gameState === 'playing' ? '🔥' : '💣'}
+                            </div>
+                            <h1 className="text-3xl font-bold text-orange-500 uppercase tracking-wider">Bomba Opus</h1>
+                        </div>
+
+                        <div className="p-6 space-y-6">
+                            {errorMsg && <div className="bg-red-900 text-red-200 p-3 rounded-lg text-sm">⚠️ {errorMsg}</div>}
+
+                            <div className="space-y-2">
+                                <label className="text-sm font-semibold text-slate-300">🎵 Subir Canción MP3</label>
+                                <label className="flex flex-col items-center justify-center w-full h-20 border-2 border-slate-600 border-dashed rounded-xl cursor-pointer bg-slate-700/30">
+                                    <span className="text-sm text-slate-300 px-4 text-center">
+                                        {isLoading ? "⏳ Cargando..." : audioFileName ? audioFileName : "Toca aquí para seleccionar audio"}
+                                    </span>
+                                    <input type="file" accept="audio/*" className="hidden" onChange={handleFileUpload} disabled={isLoading || gameState !== 'idle'} />
+                                </label>
+                            </div>
+
+                            <div className="bg-slate-900 p-4 rounded-xl space-y-4">
+                                <div className="text-sm font-semibold text-slate-300">⚙️ Configuración</div>
+                                <div>
+                                    <label className="block text-xs text-slate-400 mb-1">Momento del Drop (mm:ss)</label>
+                                    <input type="text" value={dropTimeStr} onChange={(e) => setDropTimeStr(e.target.value)} disabled={gameState !== 'idle'} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">Mínimo (seg)</label>
+                                        <input type="number" value={minTime} onChange={(e) => setMinTime(e.target.value)} disabled={gameState !== 'idle'} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">Máximo (seg)</label>
+                                        <input type="number" value={maxTime} onChange={(e) => setMaxTime(e.target.value)} disabled={gameState !== 'idle'} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {gameState === 'idle' ? (
+                                <button onClick={iniciarJuego} disabled={!audioBuffer || isLoading} className="w-full py-4 rounded-xl font-bold text-lg bg-orange-600 hover:bg-orange-500 text-white disabled:opacity-50">
+                                    ▶️ INICIAR JUEGO
+                                </button>
+                            ) : (
+                                <button onClick={stopJuego} className="w-full py-4 rounded-xl font-bold text-lg bg-slate-700 text-white">
+                                    ⏹️ DETENER
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {gameState === 'exploded' && (
+                        <div className="fixed inset-0 bg-red-950/95 z-50 flex flex-col items-center justify-center p-4">
+                            <div className="text-8xl animate-bounce mb-4">💥</div>
+                            <h2 className="text-5xl font-black text-white tracking-widest uppercase text-shadow-xl text-center">¡BOMBA!</h2>
+                            <button onClick={stopJuego} className="mt-10 px-8 py-4 bg-white text-red-900 font-bold rounded-full text-xl">Jugar de nuevo</button>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
