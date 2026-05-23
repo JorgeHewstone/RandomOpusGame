@@ -6,7 +6,7 @@
     <title>Bomba Opus</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script crossorigin src="https://unpkg-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body class="bg-slate-900 text-white font-sans">
@@ -22,7 +22,8 @@
             const [isLoading, setIsLoading] = useState(true);
             const [isDecoding, setIsDecoding] = useState(false);
             
-            const [dropTimeStr, setDropTimeStr] = useState("03:42");
+            // 🔥 Ajustado a 03:35 por defecto
+            const [dropTimeStr, setDropTimeStr] = useState("03:35");
             const [minTime, setMinTime] = useState(30);
             const [maxTime, setMaxTime] = useState(120);
 
@@ -34,23 +35,22 @@
             const source2Ref = useRef(null);
             const timeoutRef = useRef(null);
 
-            // 1. SOLO DESCARGAMOS EL ARCHIVO (No iniciamos el audio aún para no enojar al iPhone)
             useEffect(() => {
                 const descargarAudio = async () => {
                     try {
+                        // 🔥 Ahora busca "Opus.mp3" con O mayúscula
                         const response = await fetch('./Opus.mp3');
-                        if (!response.ok) throw new Error("No se encontró opus.mp3 en el servidor");
+                        if (!response.ok) throw new Error("No se encontró Opus.mp3");
                         
                         const arrayBuffer = await response.arrayBuffer();
                         setRawAudioData(arrayBuffer);
                         setIsLoading(false);
                     } catch (error) {
                         console.error(error);
-                        setErrorMsg("Error: Asegúrate de haber subido 'opus.mp3' a GitHub exactamente con ese nombre.");
+                        setErrorMsg("Asegúrate de que 'Opus.mp3' está subido correctamente (respetando la mayúscula).");
                         setIsLoading(false);
                     }
                 };
-
                 descargarAudio();
             }, []);
 
@@ -67,10 +67,9 @@
                 setGameState("idle");
             };
 
-            // 2. INICIAMOS EL AUDIO SOLO CUANDO EL USUARIO HACE CLIC EN EL BOTÓN
             const iniciarJuego = async () => {
-                if (isLoading) return setErrorMsg("La canción aún se está descargando...");
-                if (!rawAudioData && !audioBuffer) return setErrorMsg("Fallo al descargar los datos.");
+                if (isLoading) return setErrorMsg("Descargando...");
+                if (!rawAudioData && !audioBuffer) return setErrorMsg("Sin datos de audio.");
 
                 const dropSeconds = parseTime(dropTimeStr);
                 let minSeconds = parseInt(minTime, 10);
@@ -83,38 +82,41 @@
                 setErrorMsg("");
                 stopJuego();
 
-                // Aquí engañamos al iPhone: Se inicia al tocar el botón
                 if (!audioCtxRef.current) {
                     const AudioContext = window.AudioContext || window.webkitAudioContext;
                     audioCtxRef.current = new AudioContext();
                 }
                 const ctx = audioCtxRef.current;
+                
+                if (ctx.state === 'suspended') {
+                    ctx.resume();
+                }
 
                 let currentBuffer = audioBuffer;
 
-                // Si es la primera vez que se presiona Play, procesamos la canción
                 if (!currentBuffer && rawAudioData) {
                     setIsDecoding(true);
                     try {
-                        // Método a prueba de fallos para Safari
+                        const bufferParaSafari = rawAudioData.slice(0);
+                        
                         currentBuffer = await new Promise((resolve, reject) => {
                             ctx.decodeAudioData(
-                                rawAudioData.slice(0), 
+                                bufferParaSafari, 
                                 (decoded) => resolve(decoded),
                                 (err) => reject(err)
                             );
                         });
+                        
                         setAudioBuffer(currentBuffer);
+                        setRawAudioData(null); 
                         setIsDecoding(false);
                     } catch (err) {
                         setIsDecoding(false);
-                        return setErrorMsg("Error procesando audio en iOS.");
+                        const detalle = err ? (err.message || err.name || "Archivo no soportado") : "Desconocido";
+                        return setErrorMsg("Error iOS: " + detalle + ". Prueba con otro MP3.");
                     }
                 }
 
-                if (ctx.state === 'suspended') await ctx.resume();
-
-                // Cálculo matemático del juego
                 const targetDuration = Math.floor(Math.random() * (maxSeconds - minSeconds + 1)) + minSeconds;
                 const skipAmount = dropSeconds - targetDuration;
 
@@ -177,7 +179,7 @@
                         </div>
 
                         <div className="p-6 space-y-6">
-                            {errorMsg && <div className="bg-red-900 text-red-200 p-3 rounded-lg text-sm">⚠️ {errorMsg}</div>}
+                            {errorMsg && <div className="bg-red-900 text-red-200 p-3 rounded-lg text-sm font-semibold break-words">⚠️ {errorMsg}</div>}
 
                             <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 text-center">
                                 {isLoading ? (
