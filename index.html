@@ -1,4 +1,4 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -16,10 +16,13 @@
         const { useState, useRef, useEffect } = React;
 
         function App() {
+            const [rawAudioData, setRawAudioData] = useState(null);
             const [audioBuffer, setAudioBuffer] = useState(null);
-            const [isLoading, setIsLoading] = useState(true);
             
-            const [dropTimeStr, setDropTimeStr] = useState("03:30");
+            const [isLoading, setIsLoading] = useState(true);
+            const [isDecoding, setIsDecoding] = useState(false);
+            
+            const [dropTimeStr, setDropTimeStr] = useState("03:42");
             const [minTime, setMinTime] = useState(30);
             const [maxTime, setMaxTime] = useState(120);
 
@@ -31,30 +34,24 @@
             const source2Ref = useRef(null);
             const timeoutRef = useRef(null);
 
-            // Cargar la canción automáticamente al abrir la página
+            // 1. SOLO DESCARGAMOS EL ARCHIVO (No iniciamos el audio aún para no enojar al iPhone)
             useEffect(() => {
-                const cargarAudioAutomaticamente = async () => {
+                const descargarAudio = async () => {
                     try {
                         const response = await fetch('./Opus.mp3');
                         if (!response.ok) throw new Error("No se encontró opus.mp3 en el servidor");
                         
                         const arrayBuffer = await response.arrayBuffer();
-                        
-                        if (!audioCtxRef.current) {
-                            audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-                        }
-                        
-                        const decodedBuffer = await audioCtxRef.current.decodeAudioData(arrayBuffer);
-                        setAudioBuffer(decodedBuffer);
+                        setRawAudioData(arrayBuffer);
                         setIsLoading(false);
                     } catch (error) {
                         console.error(error);
-                        setErrorMsg("No se encontró la canción. Asegúrate de haber subido 'opus.mp3' a GitHub.");
+                        setErrorMsg("Error: Asegúrate de haber subido 'opus.mp3' a GitHub exactamente con ese nombre.");
                         setIsLoading(false);
                     }
                 };
 
-                cargarAudioAutomaticamente();
+                descargarAudio();
             }, []);
 
             const parseTime = (timeStr) => {
@@ -70,8 +67,10 @@
                 setGameState("idle");
             };
 
+            // 2. INICIAMOS EL AUDIO SOLO CUANDO EL USUARIO HACE CLIC EN EL BOTÓN
             const iniciarJuego = async () => {
-                if (!audioBuffer) return setErrorMsg("La canción aún no está lista.");
+                if (isLoading) return setErrorMsg("La canción aún se está descargando...");
+                if (!rawAudioData && !audioBuffer) return setErrorMsg("Fallo al descargar los datos.");
 
                 const dropSeconds = parseTime(dropTimeStr);
                 let minSeconds = parseInt(minTime, 10);
@@ -84,9 +83,38 @@
                 setErrorMsg("");
                 stopJuego();
 
+                // Aquí engañamos al iPhone: Se inicia al tocar el botón
+                if (!audioCtxRef.current) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    audioCtxRef.current = new AudioContext();
+                }
                 const ctx = audioCtxRef.current;
+
+                let currentBuffer = audioBuffer;
+
+                // Si es la primera vez que se presiona Play, procesamos la canción
+                if (!currentBuffer && rawAudioData) {
+                    setIsDecoding(true);
+                    try {
+                        // Método a prueba de fallos para Safari
+                        currentBuffer = await new Promise((resolve, reject) => {
+                            ctx.decodeAudioData(
+                                rawAudioData.slice(0), 
+                                (decoded) => resolve(decoded),
+                                (err) => reject(err)
+                            );
+                        });
+                        setAudioBuffer(currentBuffer);
+                        setIsDecoding(false);
+                    } catch (err) {
+                        setIsDecoding(false);
+                        return setErrorMsg("Error procesando audio en iOS.");
+                    }
+                }
+
                 if (ctx.state === 'suspended') await ctx.resume();
 
+                // Cálculo matemático del juego
                 const targetDuration = Math.floor(Math.random() * (maxSeconds - minSeconds + 1)) + minSeconds;
                 const skipAmount = dropSeconds - targetDuration;
 
@@ -96,7 +124,7 @@
 
                 if (skipAmount <= 0) {
                     const source = ctx.createBufferSource();
-                    source.buffer = audioBuffer;
+                    source.buffer = currentBuffer;
                     source.connect(masterGain);
                     source.start(t0);
                     source1Ref.current = source;
@@ -105,13 +133,13 @@
                     const crossfadeDuration = Math.min(4, introDuration * 0.8); 
 
                     const source1 = ctx.createBufferSource();
-                    source1.buffer = audioBuffer;
+                    source1.buffer = currentBuffer;
                     const gain1 = ctx.createGain();
                     source1.connect(gain1);
                     gain1.connect(masterGain);
 
                     const source2 = ctx.createBufferSource();
-                    source2.buffer = audioBuffer;
+                    source2.buffer = currentBuffer;
                     const gain2 = ctx.createGain();
                     source2.connect(gain2);
                     gain2.connect(masterGain);
@@ -155,9 +183,11 @@
                                 {isLoading ? (
                                     <div className="text-yellow-400 animate-pulse font-semibold">⏳ Descargando Opus...</div>
                                 ) : audioBuffer ? (
-                                    <div className="text-green-400 font-semibold">✅ Canción lista para jugar</div>
+                                    <div className="text-green-400 font-semibold">✅ Canción procesada y lista</div>
+                                ) : rawAudioData ? (
+                                    <div className="text-blue-400 font-semibold">✅ Audio descargado. Toca iniciar.</div>
                                 ) : (
-                                    <div className="text-red-400 font-semibold">❌ Error al cargar canción</div>
+                                    <div className="text-red-400 font-semibold">❌ Error general</div>
                                 )}
                             </div>
 
@@ -180,8 +210,8 @@
                             </div>
 
                             {gameState === 'idle' ? (
-                                <button onClick={iniciarJuego} disabled={!audioBuffer || isLoading} className="w-full py-4 rounded-xl font-bold text-lg bg-orange-600 hover:bg-orange-500 text-white disabled:opacity-50">
-                                    ▶️ INICIAR JUEGO
+                                <button onClick={iniciarJuego} disabled={isLoading || isDecoding} className="w-full py-4 rounded-xl font-bold text-lg bg-orange-600 hover:bg-orange-500 text-white disabled:opacity-50">
+                                    {isDecoding ? "⚙️ PREPARANDO..." : "▶️ INICIAR JUEGO"}
                                 </button>
                             ) : (
                                 <button onClick={stopJuego} className="w-full py-4 rounded-xl font-bold text-lg bg-slate-700 text-white">
