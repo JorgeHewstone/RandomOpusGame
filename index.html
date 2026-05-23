@@ -5,15 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bomba Opus</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- ¡Aquí estaba el error tipográfico! Ya está corregido a unpkg.com -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg-dom@18/umd/react-dom.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body class="bg-slate-900 text-white font-sans">
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useRef, useEffect } = React;
+        const { useState, useRef } = React;
 
         function App() {
             const [dropTimeStr, setDropTimeStr] = useState("03:35");
@@ -22,19 +23,10 @@
             const [gameState, setGameState] = useState("idle");
             const [errorMsg, setErrorMsg] = useState("");
 
-            // Reproductores de audio HTML5 nativos (A prueba de fallos en iOS)
             const audio1Ref = useRef(null);
             const audio2Ref = useRef(null);
             const gameTimerRef = useRef(null);
             const fadeTimerRef = useRef(null);
-
-            useEffect(() => {
-                // Pre-cargamos los reproductores al abrir la web
-                audio1Ref.current = new Audio('./Opus.mp3');
-                audio2Ref.current = new Audio('./Opus.mp3');
-                audio1Ref.current.preload = "auto";
-                audio2Ref.current.preload = "auto";
-            }, []);
 
             const parseTime = (timeStr) => {
                 const parts = timeStr.split(':');
@@ -71,25 +63,35 @@
                 const targetDuration = Math.floor(Math.random() * (maxSeconds - minSeconds + 1)) + minSeconds;
                 const skipAmount = dropSeconds - targetDuration;
 
-                // 🟢 DESBLOQUEO IOS: Iniciamos ambos reproductores en silencio con el clic
+                // 🟢 DESBLOQUEO NATIVO: Usamos el reproductor HTML5 directo
                 try {
-                    audio1Ref.current.volume = 1;
-                    audio1Ref.current.currentTime = 0;
-                    audio1Ref.current.play().catch(e => console.warn("A1:", e));
+                    const a1 = audio1Ref.current;
+                    const a2 = audio2Ref.current;
+                    
+                    a1.volume = 1;
+                    a1.currentTime = 0;
+                    let playPromise = a1.play();
+                    
+                    if (playPromise !== undefined) {
+                        playPromise.catch(e => {
+                            setErrorMsg("Aviso: Toca cualquier parte de la pantalla antes de darle a Iniciar.");
+                        });
+                    }
 
-                    audio2Ref.current.volume = 0;
-                    audio2Ref.current.currentTime = 0;
-                    // Lo reproducimos e inmediatamente pausamos para dejarlo listo
-                    audio2Ref.current.play().then(() => {
-                        audio2Ref.current.pause(); 
-                    }).catch(e => console.warn("A2:", e));
+                    a2.volume = 0;
+                    a2.currentTime = 0;
+                    let playPromise2 = a2.play();
+                    if (playPromise2 !== undefined) {
+                        playPromise2.then(() => {
+                            a2.pause(); 
+                        }).catch(e => console.warn("A2:", e));
+                    }
                 } catch (err) {
                     return setErrorMsg("Error iniciando el audio. Asegúrate de tocar la pantalla.");
                 }
 
                 setGameState("playing");
 
-                // Sistema de tiempo
                 let gameTimeMs = 0;
                 const tickMs = 100;
                 const introDuration = Math.min(15, targetDuration * 0.4);
@@ -97,31 +99,29 @@
                 const crossfadeStartTime = introDuration - crossfadeDuration;
                 let fadeStarted = false;
 
-                // Bucle principal del juego
+                // Bucle del juego
                 gameTimerRef.current = setInterval(() => {
                     gameTimeMs += tickMs;
                     const gameTimeSec = gameTimeMs / 1000;
 
-                    // 1. Momento de la explosión
                     if (gameTimeSec >= targetDuration) {
                         clearInterval(gameTimerRef.current);
                         clearInterval(fadeTimerRef.current);
-                        audio1Ref.current.pause();
-                        audio2Ref.current.pause();
+                        if (audio1Ref.current) audio1Ref.current.pause();
+                        if (audio2Ref.current) audio2Ref.current.pause();
                         setGameState("exploded");
                         return;
                     }
 
-                    // 2. Momento del "Salto difuminado" (Crossfade)
                     if (skipAmount > 0 && gameTimeSec >= crossfadeStartTime && !fadeStarted) {
                         fadeStarted = true;
 
-                        // Preparamos la segunda pista en el momento del clímax
                         const s2Offset = crossfadeStartTime + skipAmount;
-                        audio2Ref.current.currentTime = s2Offset;
-                        audio2Ref.current.play().catch(e => console.error(e));
+                        if (audio2Ref.current) {
+                            audio2Ref.current.currentTime = s2Offset;
+                            audio2Ref.current.play().catch(e => console.error(e));
+                        }
 
-                        // Hacemos el cruce de volumen suavemente
                         let fadeTimeMs = 0;
                         const fadeTickMs = 50;
                         fadeTimerRef.current = setInterval(() => {
@@ -129,11 +129,9 @@
                             let progress = fadeTimeMs / (crossfadeDuration * 1000);
                             if (progress >= 1) progress = 1;
 
-                            // Bajamos pista 1, subimos pista 2
-                            if (audio1Ref.current) audio1Ref.current.volume = 1 - progress;
-                            if (audio2Ref.current) audio2Ref.current.volume = progress;
+                            if (audio1Ref.current) audio1Ref.current.volume = Math.max(0, 1 - progress);
+                            if (audio2Ref.current) audio2Ref.current.volume = Math.min(1, progress);
 
-                            // Apagamos pista 1 al terminar el cruce
                             if (progress === 1) {
                                 clearInterval(fadeTimerRef.current);
                                 if (audio1Ref.current) audio1Ref.current.pause();
@@ -145,6 +143,11 @@
 
             return (
                 <div className="flex flex-col items-center py-6 px-4">
+                    
+                    {/* Reproductores nativos ocultos. playsInline evita que iPhone abra video a pantalla completa */}
+                    <audio ref={audio1Ref} src="./Opus.mp3" preload="auto" playsInline />
+                    <audio ref={audio2Ref} src="./Opus.mp3" preload="auto" playsInline />
+
                     <div className="max-w-md w-full bg-slate-800 rounded-2xl shadow-xl overflow-hidden border border-slate-700 pb-6">
                         
                         <div className="bg-slate-950 p-6 text-center border-b border-slate-700">
@@ -159,7 +162,7 @@
 
                             <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 text-center">
                                 <div className="text-green-400 font-semibold">✅ Sistema listo y optimizado</div>
-                                <div className="text-xs text-slate-400 mt-1">Soporte nativo para iOS activo</div>
+                                <div className="text-xs text-slate-400 mt-1">Soporte nativo para Chrome y Safari activo</div>
                             </div>
 
                             <div className="bg-slate-900 p-4 rounded-xl space-y-4">
