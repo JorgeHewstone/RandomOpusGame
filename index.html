@@ -35,7 +35,7 @@
             useEffect(() => {
                 const cargarAudioAutomaticamente = async () => {
                     try {
-                        const response = await fetch('./opus.mp3');
+                        const response = await fetch('./Opus.mp3');
                         if (!response.ok) throw new Error("No se encontró opus.mp3 en el servidor");
                         
                         const arrayBuffer = await response.arrayBuffer();
