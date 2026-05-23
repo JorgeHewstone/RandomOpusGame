@@ -1,18 +1,12 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bomba Opus</title>
-    
-    <!-- Cargamos Tailwind CSS para el diseño -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Cargamos React -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    
-    <!-- Cargamos Babel para que entienda el código en el navegador -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body class="bg-slate-900 text-white font-sans">
@@ -23,8 +17,7 @@
 
         function App() {
             const [audioBuffer, setAudioBuffer] = useState(null);
-            const [audioFileName, setAudioFileName] = useState("");
-            const [isLoading, setIsLoading] = useState(false);
+            const [isLoading, setIsLoading] = useState(true);
             
             const [dropTimeStr, setDropTimeStr] = useState("03:42");
             const [minTime, setMinTime] = useState(30);
@@ -38,35 +31,36 @@
             const source2Ref = useRef(null);
             const timeoutRef = useRef(null);
 
+            // Cargar la canción automáticamente al abrir la página
+            useEffect(() => {
+                const cargarAudioAutomaticamente = async () => {
+                    try {
+                        const response = await fetch('./opus.mp3');
+                        if (!response.ok) throw new Error("No se encontró opus.mp3 en el servidor");
+                        
+                        const arrayBuffer = await response.arrayBuffer();
+                        
+                        if (!audioCtxRef.current) {
+                            audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+                        }
+                        
+                        const decodedBuffer = await audioCtxRef.current.decodeAudioData(arrayBuffer);
+                        setAudioBuffer(decodedBuffer);
+                        setIsLoading(false);
+                    } catch (error) {
+                        console.error(error);
+                        setErrorMsg("No se encontró la canción. Asegúrate de haber subido 'opus.mp3' a GitHub.");
+                        setIsLoading(false);
+                    }
+                };
+
+                cargarAudioAutomaticamente();
+            }, []);
+
             const parseTime = (timeStr) => {
                 const parts = timeStr.split(':');
-                if (parts.length === 2) {
-                    return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
-                }
+                if (parts.length === 2) return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
                 return parseInt(timeStr, 10) || 0;
-            };
-
-            const handleFileUpload = async (event) => {
-                const file = event.target.files[0];
-                if (!file) return;
-
-                setAudioFileName(file.name);
-                setIsLoading(true);
-                setErrorMsg("");
-
-                try {
-                    if (!audioCtxRef.current) {
-                        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-                    }
-
-                    const arrayBuffer = await file.arrayBuffer();
-                    const decodedBuffer = await audioCtxRef.current.decodeAudioData(arrayBuffer);
-                    setAudioBuffer(decodedBuffer);
-                    setIsLoading(false);
-                } catch (error) {
-                    setErrorMsg("Error al cargar el archivo de audio.");
-                    setIsLoading(false);
-                }
             };
 
             const stopJuego = () => {
@@ -77,10 +71,7 @@
             };
 
             const iniciarJuego = async () => {
-                if (!audioBuffer) {
-                    setErrorMsg("Por favor, sube la canción primero.");
-                    return;
-                }
+                if (!audioBuffer) return setErrorMsg("La canción aún no está lista.");
 
                 const dropSeconds = parseTime(dropTimeStr);
                 let minSeconds = parseInt(minTime, 10);
@@ -160,30 +151,30 @@
                         <div className="p-6 space-y-6">
                             {errorMsg && <div className="bg-red-900 text-red-200 p-3 rounded-lg text-sm">⚠️ {errorMsg}</div>}
 
-                            <div className="space-y-2">
-                                <label className="text-sm font-semibold text-slate-300">🎵 Subir Canción MP3</label>
-                                <label className="flex flex-col items-center justify-center w-full h-20 border-2 border-slate-600 border-dashed rounded-xl cursor-pointer bg-slate-700/30">
-                                    <span className="text-sm text-slate-300 px-4 text-center">
-                                        {isLoading ? "⏳ Cargando..." : audioFileName ? audioFileName : "Toca aquí para seleccionar audio"}
-                                    </span>
-                                    <input type="file" accept="audio/*" className="hidden" onChange={handleFileUpload} disabled={isLoading || gameState !== 'idle'} />
-                                </label>
+                            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700 text-center">
+                                {isLoading ? (
+                                    <div className="text-yellow-400 animate-pulse font-semibold">⏳ Descargando Opus...</div>
+                                ) : audioBuffer ? (
+                                    <div className="text-green-400 font-semibold">✅ Canción lista para jugar</div>
+                                ) : (
+                                    <div className="text-red-400 font-semibold">❌ Error al cargar canción</div>
+                                )}
                             </div>
 
                             <div className="bg-slate-900 p-4 rounded-xl space-y-4">
                                 <div className="text-sm font-semibold text-slate-300">⚙️ Configuración</div>
                                 <div>
                                     <label className="block text-xs text-slate-400 mb-1">Momento del Drop (mm:ss)</label>
-                                    <input type="text" value={dropTimeStr} onChange={(e) => setDropTimeStr(e.target.value)} disabled={gameState !== 'idle'} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" />
+                                    <input type="text" value={dropTimeStr} onChange={(e) => setDropTimeStr(e.target.value)} disabled={gameState !== 'idle'} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-center font-mono text-lg" />
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
                                         <label className="block text-xs text-slate-400 mb-1">Mínimo (seg)</label>
-                                        <input type="number" value={minTime} onChange={(e) => setMinTime(e.target.value)} disabled={gameState !== 'idle'} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" />
+                                        <input type="number" value={minTime} onChange={(e) => setMinTime(e.target.value)} disabled={gameState !== 'idle'} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-center font-mono text-lg" />
                                     </div>
                                     <div>
                                         <label className="block text-xs text-slate-400 mb-1">Máximo (seg)</label>
-                                        <input type="number" value={maxTime} onChange={(e) => setMaxTime(e.target.value)} disabled={gameState !== 'idle'} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white" />
+                                        <input type="number" value={maxTime} onChange={(e) => setMaxTime(e.target.value)} disabled={gameState !== 'idle'} className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white text-center font-mono text-lg" />
                                     </div>
                                 </div>
                             </div>
@@ -194,7 +185,7 @@
                                 </button>
                             ) : (
                                 <button onClick={stopJuego} className="w-full py-4 rounded-xl font-bold text-lg bg-slate-700 text-white">
-                                    ⏹️ DETENER
+                                    ⏹️ CANCELAR JUEGO
                                 </button>
                             )}
                         </div>
